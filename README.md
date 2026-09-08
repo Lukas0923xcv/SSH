@@ -7,9 +7,10 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 ## Features
 
 - **Quick menu**: Connect by typing `user@host` or pick from your saved list.
-- **Custom ports**: Supports `user@host:2222`.
+- **Custom ports**: Supports `user@host:2222` and bracketed IPv6 `[::1]:2222`.
 - **Saved hosts**: Bookmark servers with custom friendly names.
-- **Safe by default**: Only listens on `127.0.0.1:8888` locally, so it cannot be reached from the public internet without passing through your tunnel.
+- **Safe by default**: Only listens on `127.0.0.1:8888` locally, with Cross-Site WebSocket Hijacking (CSWSH) protection and security headers.
+- **Security hardened**: Input sanitization preventing argument and terminal escape injection, hashed known hosts (`HashKnownHosts`), and unprivileged non-root execution.
 - **Persistent storage**: Saved hosts, verified `known_hosts`, and SSH keys are stored in `./data`.
 
 ---
