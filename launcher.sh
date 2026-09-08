@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-set -e
 
 # Restrict file creation permissions (owner read/write only)
 umask 077
 
 # Resolve application version number
-VERSION="1.2.0"
+VERSION="1.2.1"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
