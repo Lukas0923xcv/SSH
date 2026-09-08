@@ -28,6 +28,27 @@ git clone https://github.com/Lukas0923xcv/SSH.git /opt/webssh && cd /opt/webssh 
 
 ---
 
+## 🔄 Updating to the Latest Version
+
+If you already have an existing installation running, your saved hosts (`./data/hosts.txt`) and SSH keys are safely preserved in the `./data/` volume. Run this 1-liner from your project directory (e.g. `/opt/webssh`) to pull the latest security patches and rebuild:
+
+```bash
+cd /opt/webssh && git pull && chmod +x launcher.sh && docker compose up -d --build
+```
+
+*(If running with the Cloudflare Tunnel profile inside Docker, run:)*
+```bash
+cd /opt/webssh && git pull && chmod +x launcher.sh && docker compose --profile tunnel up -d --build
+```
+
+> [!TIP]
+> If your original installation was cloned with the old repository URL (`SSH-Center.git`), update your remote URL first:
+> ```bash
+> git remote set-url origin https://github.com/Lukas0923xcv/SSH.git
+> ```
+
+---
+
 ## 🔒 Cloudflare Zero Trust Setup Guide
 
 This project is built specifically to be accessed through a Cloudflare Zero Trust Tunnel with an authentication policy.
