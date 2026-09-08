@@ -10,7 +10,7 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 - **Visible versioning**: Current application version is displayed in the web UI terminal banner and window title.
 - **Custom ports**: Supports `user@host:2222` and bracketed IPv6 `[::1]:2222`.
 - **Saved hosts**: Bookmark servers with custom friendly names with atomic, race-free storage.
-- **Safe by default**: Only listens on `127.0.0.1:8888` locally, with Cross-Site WebSocket Hijacking (CSWSH) protection and strict security headers.
+- **Safe by default**: Listens on port `8888` with Cross-Site WebSocket Hijacking (CSWSH) protection and strict security headers, easily reachable by local/Docker Cloudflare Tunnels and LAN IPs.
 - **Security hardened**: Input sanitization preventing argument and terminal escape injection, hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), unprivileged execution, and build context isolation (`.dockerignore`).
 - **Persistent storage**: Saved hosts, verified `known_hosts`, and SSH keys are stored in `./data`.
 
@@ -43,10 +43,10 @@ The web terminal will start locally at `http://127.0.0.1:8888`.
 Because the web terminal doesn't have built-in logins, **you should always put it behind a Cloudflare Tunnel with an Access policy** (Google/GitHub login, email pin, etc.).
 
 ### Option 1: Host Cloudflare Tunnel (Recommended)
-If `cloudflared` is installed on your host machine:
+If `cloudflared` is installed on your host machine or another device on your network:
 1. In your Cloudflare Zero Trust dashboard, go to **Networks > Tunnels**.
 2. Add a Public Hostname (e.g. `ssh.yourdomain.com`).
-3. Set the service to **HTTP** -> `localhost:8888`.
+3. Set the service to **HTTP** -> `localhost:8888` (or `http://<your-lan-ip>:8888`, e.g. `http://192.168.1.209:8888`).
 
 ### Option 2: Docker Cloudflare Tunnel
 If you prefer running `cloudflared` in Docker alongside the stack:
@@ -62,7 +62,7 @@ If you prefer running `cloudflared` in Docker alongside the stack:
    ```bash
    docker compose --profile tunnel up -d --build
    ```
-4. In the Cloudflare Tunnel dashboard, point your hostname to **HTTP** -> `nginx:8888`.
+4. In the Cloudflare Tunnel dashboard, you can point your hostname to **HTTP** -> `localhost:8888` or your LAN IP.
 
 ### Don't forget an Access Policy!
 In the Zero Trust dashboard under **Access > Applications**, create an application for your hostname (e.g. `ssh.yourdomain.com`) and add an Allow rule for your email. This ensures only you can reach the terminal.
