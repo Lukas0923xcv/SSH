@@ -3,8 +3,10 @@ services:
     image: nginx:alpine
     container_name: webssh-proxy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "8888:8888"
+      - "127.0.0.1:8888:8888"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -14,6 +16,8 @@ services:
     build: .
     container_name: ttyd
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     expose:
       - "7681"
     volumes:

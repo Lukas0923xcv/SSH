@@ -29,8 +29,10 @@ git clone https://github.com/Lukas0923xcv/SSH.git /opt/webssh && cd /opt/webssh 
 ---
 
 ## Post-Install
-- **Web Terminal:** Accessible locally at `http://<HOST-IP>:8888`
-- **Reverse Proxy / Cloudflare Tunnel:** Point your public hostname (e.g. `ssh.example.com`) to `http://localhost:8888`
+- **Local Access:** Accessible on the host at `http://127.0.0.1:8888` (bound to localhost by default for security).
+- **Reverse Proxy / Cloudflare Tunnel:** Point your tunnel or public hostname (e.g. `ssh.example.com`) to `http://localhost:8888`.
+- **Custom Ports:** Targets can be specified as `user@host` or `user@host:port`.
+- **SSH Keys:** You can place an optional `.ssh/` folder inside `./data` (`./data/.ssh/id_*`) to persist custom SSH keys.
 
 > [!WARNING]
-> **Security Notice:** Do not expose port `8888` directly to the open internet without an authentication layer (such as Cloudflare Access, HTTP basic auth, or VPN), as terminal access is unauthenticated by default.
+> **Security Notice:** Port `8888` is bound to `127.0.0.1` by default to ensure it cannot be accessed directly over the public internet. Always route web access through an authenticated proxy (such as Cloudflare Zero Trust Access, Authentik/Authelia, or a VPN), as the web terminal itself is unauthenticated.
