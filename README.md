@@ -16,7 +16,13 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 
 ## Quick Start
 
-### 1. Clone and launch
+### 1. Install Docker (optional, if not installed yet)
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+### 2. Clone and launch
 
 ```bash
 git clone https://github.com/Lukas0923xcv/SSH.git /opt/webssh
@@ -25,8 +31,6 @@ mkdir -p data
 chmod +x launcher.sh
 docker compose up -d --build
 ```
-
-*(If you're setting this up on a brand new Ubuntu/Debian server that doesn't have Docker yet, install it first via `curl -fsSL https://get.docker.com | sh`)*.
 
 The web terminal will start locally at `http://127.0.0.1:8888`.
 
