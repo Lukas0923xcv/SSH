@@ -29,6 +29,7 @@ services:
       - -W
       - -t
       - copyOnSelect=true
+      - bash
       - /usr/local/bin/launcher.sh
 
   # Optional: Run Cloudflare Tunnel directly in Docker
