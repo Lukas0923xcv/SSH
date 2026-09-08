@@ -13,3 +13,4 @@ authorized_keys
 # Ignore environment configs
 .env
 .env.*
+!.env.example

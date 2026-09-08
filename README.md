@@ -28,11 +28,52 @@ git clone https://github.com/Lukas0923xcv/SSH.git /opt/webssh && cd /opt/webssh 
 
 ---
 
-## Post-Install
-- **Local Access:** Accessible on the host at `http://127.0.0.1:8888` (bound to localhost by default for security).
-- **Reverse Proxy / Cloudflare Tunnel:** Point your tunnel or public hostname (e.g. `ssh.example.com`) to `http://localhost:8888`.
-- **Custom Ports:** Targets can be specified as `user@host` or `user@host:port`.
-- **SSH Keys:** You can place an optional `.ssh/` folder inside `./data` (`./data/.ssh/id_*`) to persist custom SSH keys.
+## 🔒 Cloudflare Zero Trust Setup Guide
 
-> [!WARNING]
-> **Security Notice:** Port `8888` is bound to `127.0.0.1` by default to ensure it cannot be accessed directly over the public internet. Always route web access through an authenticated proxy (such as Cloudflare Zero Trust Access, Authentik/Authelia, or a VPN), as the web terminal itself is unauthenticated.
+This project is built specifically to be accessed through a Cloudflare Zero Trust Tunnel with an authentication policy.
+
+### Step 1: Create a Tunnel in Cloudflare
+In the [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/):
+1. Navigate to **Networks** > **Tunnels** and click **Create a tunnel** (select `Cloudflared`).
+2. Choose your deployment method:
+
+#### Method A: Run Cloudflare Tunnel on Host Machine (Recommended)
+Follow the dashboard instructions to install `cloudflared` on the host VM, then configure the **Public Hostname**:
+* **Subdomain / Domain:** e.g., `ssh.yourdomain.com`
+* **Service Type:** `HTTP`
+* **URL:** `localhost:8888` (or `127.0.0.1:8888`)
+
+#### Method B: Run Cloudflare Tunnel Inside Docker
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Paste your Tunnel Token into `.env`:
+   ```env
+   TUNNEL_TOKEN=eyJhIjoi...
+   ```
+3. Launch with the tunnel profile:
+   ```bash
+   docker compose --profile tunnel up -d --build
+   ```
+4. In the Cloudflare Tunnel Public Hostname configuration, point the service to:
+   * **Service Type:** `HTTP`
+   * **URL:** `nginx:8888`
+
+---
+
+### Step 2: Protect with Cloudflare Access (Required for Security!)
+A Cloudflare Tunnel exposes the web service through Cloudflare's network, but **Access Applications** provide the authentication gatekeeper:
+1. In Cloudflare Zero Trust, go to **Access** > **Applications** > **Add an application** > **Self-hosted**.
+2. Set the **Application Domain** to match your tunnel hostname (e.g. `ssh.yourdomain.com`).
+3. Add an **Access Policy** (e.g. "Allow" rule restricted to your email address, Google/GitHub SSO, or email OTP).
+4. Save the application. Now, anyone attempting to access your SSH bastion must authenticate through Cloudflare before reaching the terminal!
+
+---
+
+## 🛠️ Post-Install & Usage Details
+- **Local Port Binding:** Port `8888` is bound to `127.0.0.1` by default. This ensures the web terminal is never exposed directly on your server's public IP, preventing anyone from bypassing Cloudflare Access.
+- **Custom Ports:** Targets in the launcher can be specified as `user@host` or `user@host:port`.
+- **SSH Keys:** You can place an optional `.ssh/` folder inside `./data` (`./data/.ssh/id_*`) to persist custom SSH keys.
+- **Host Key Verification:** Verified remote host keys are saved to `./data/known_hosts` so they persist across container rebuilds.
+
