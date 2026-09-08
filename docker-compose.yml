@@ -22,6 +22,7 @@ services:
       - "7681"
     volumes:
       - ./launcher.sh:/usr/local/bin/launcher.sh:ro
+      - ./VERSION:/etc/webssh-version:ro
       - ./data:/data
     command:
       - ttyd
@@ -43,6 +44,8 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: webssh-tunnel
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${TUNNEL_TOKEN:-}
