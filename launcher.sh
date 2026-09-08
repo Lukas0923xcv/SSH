@@ -4,7 +4,7 @@
 umask 077
 
 # Resolve application version number
-VERSION="1.2.1"
+VERSION="1.2.2"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
