@@ -41,12 +41,6 @@ cd /opt/webssh && git pull && chmod +x launcher.sh && docker compose up -d --bui
 cd /opt/webssh && git pull && chmod +x launcher.sh && docker compose --profile tunnel up -d --build
 ```
 
-> [!TIP]
-> If your original installation was cloned with the old repository URL (`SSH-Center.git`), update your remote URL first:
-> ```bash
-> git remote set-url origin https://github.com/Lukas0923xcv/SSH.git
-> ```
-
 ---
 
 ## 🔒 Cloudflare Zero Trust Setup Guide
