@@ -1,0 +1,22 @@
+# Exclude runtime and user data
+data/
+*.tmp
+*.log
+
+# Exclude credentials and private keys
+*.pem
+*.key
+id_*
+known_hosts
+authorized_keys
+
+# Exclude environment files
+.env
+.env.*
+!.env.example
+
+# Exclude version control and agent artifacts
+.git/
+.gitignore
+.gitattributes
+.agents/

@@ -7,10 +7,11 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 ## Features
 
 - **Quick menu**: Connect by typing `user@host` or pick from your saved list.
+- **Visible versioning**: Current application version is displayed in the web UI terminal banner and window title.
 - **Custom ports**: Supports `user@host:2222` and bracketed IPv6 `[::1]:2222`.
-- **Saved hosts**: Bookmark servers with custom friendly names.
-- **Safe by default**: Only listens on `127.0.0.1:8888` locally, with Cross-Site WebSocket Hijacking (CSWSH) protection and security headers.
-- **Security hardened**: Input sanitization preventing argument and terminal escape injection, hashed known hosts (`HashKnownHosts`), and unprivileged non-root execution.
+- **Saved hosts**: Bookmark servers with custom friendly names with atomic, race-free storage.
+- **Safe by default**: Only listens on `127.0.0.1:8888` locally, with Cross-Site WebSocket Hijacking (CSWSH) protection and strict security headers.
+- **Security hardened**: Input sanitization preventing argument and terminal escape injection, hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), unprivileged execution, and build context isolation (`.dockerignore`).
 - **Persistent storage**: Saved hosts, verified `known_hosts`, and SSH keys are stored in `./data`.
 
 ---
@@ -86,6 +87,10 @@ chmod +x launcher.sh
 docker compose up -d --build
 ```
 
-*(Or `docker compose --profile tunnel up -d --build` if you use the in-Docker tunnel).*
-Your saved hosts and keys in `./data` won't be touched.
+---
+ 
+## Development & AI Guidelines
+ 
+This repository enforces automated AI guidelines documented in [`AGENTS.md`](file:///AGENTS.md) and [`GEMINI.md`](file:///GEMINI.md).
+Whenever modifications, features, or security patches are introduced, the canonical version must be incremented in [`VERSION`](file:///VERSION) following Semantic Versioning.
 
