@@ -16,25 +16,34 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 
 ---
 
-## Quick Start
+## Quick Start (One-Command Install)
 
-### 1. Install Docker (optional, if not installed yet)
+Run this single command on your Ubuntu / Debian / Linux server:
 
 ```bash
-curl -fsSL https://get.docker.com | sh
+curl -sSL https://raw.githubusercontent.com/Lukas0923xcv/SSH/main/install.sh | bash
 ```
 
-### 2. Clone and launch
+The installer will automatically install Docker (if needed), clone the repo to `/opt/webssh`, configure secure permissions, and launch the Web SSH stack.
+
+The web terminal will start locally at `http://127.0.0.1:8888`.
+
+<details>
+<summary>Manual Installation</summary>
 
 ```bash
+# 1. Install Docker (if not installed yet)
+curl -fsSL https://get.docker.com | sh
+
+# 2. Clone and launch
 git clone https://github.com/Lukas0923xcv/SSH.git /opt/webssh
 cd /opt/webssh
 mkdir -p data
+chmod 700 data
 chmod +x launcher.sh
 docker compose up -d --build
 ```
-
-The web terminal will start locally at `http://127.0.0.1:8888`.
+</details>
 
 ---
 
@@ -78,12 +87,19 @@ In the Zero Trust dashboard under **Access > Applications**, create an applicati
 
 ## Updating
 
-To pull the latest changes and restart:
+To update an existing installation to the latest version, run:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/Lukas0923xcv/SSH/main/install.sh | bash
+```
+
+Or manually:
 
 ```bash
 cd /opt/webssh
 git pull
 chmod +x launcher.sh
+docker compose down
 docker compose up -d --build
 ```
 
