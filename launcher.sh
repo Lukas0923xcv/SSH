@@ -4,7 +4,7 @@
 umask 077
 
 # Resolve application version number
-VERSION="1.2.2"
+VERSION="1.2.3"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
@@ -12,10 +12,11 @@ elif [ -f "$(dirname "$0")/VERSION" ]; then
 fi
 
 HOSTS_FILE="/data/hosts.txt"
+KNOWN_HOSTS_FILE="/data/known_hosts"
 mkdir -p /data 2>/dev/null || true
 chmod 700 /data 2>/dev/null || true
-touch "$HOSTS_FILE" 2>/dev/null || true
-chmod 600 "$HOSTS_FILE" 2>/dev/null || true
+touch "$HOSTS_FILE" "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+chmod 600 "$HOSTS_FILE" "$KNOWN_HOSTS_FILE" 2>/dev/null || true
 
 # Support mounted custom SSH keys and config if available
 if [ -d "/data/.ssh" ]; then
@@ -26,7 +27,8 @@ if [ -d "/data/.ssh" ]; then
   chmod 700 /data/.ssh 2>/dev/null || true
   find /data/.ssh -type d -exec chmod 700 {} + 2>/dev/null || true
   find /data/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
-  chmod 644 /data/.ssh/*.pub /data/.ssh/config /data/known_hosts 2>/dev/null || true
+  chmod 644 /data/.ssh/*.pub /data/.ssh/config 2>/dev/null || true
+  chmod 600 "$KNOWN_HOSTS_FILE" 2>/dev/null || true
 fi
 
 # Signal handling:
@@ -125,6 +127,7 @@ validate_and_parse_target() {
 
   # Validate port if present (1 - 65535)
   if [ -n "$PARSED_PORT" ]; then
+    PARSED_PORT="$(( 10#$PARSED_PORT ))"
     if [ "$PARSED_PORT" -lt 1 ] || [ "$PARSED_PORT" -gt 65535 ]; then
       echo "Error: Port must be between 1 and 65535."
       return 1
@@ -138,6 +141,7 @@ validate_and_parse_target() {
 sanitize_nickname() {
   local nick="$1"
   nick="$(printf '%s' "$nick" | tr -d '\r\n\t|' | tr -cd '[:alnum:] _.-')"
+  nick="$(printf '%s' "$nick" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
   printf '%.32s' "$nick"
 }
 

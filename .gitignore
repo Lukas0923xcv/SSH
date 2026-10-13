@@ -6,9 +6,13 @@ data/
 # Ignore local keys and credentials
 *.pem
 *.key
+*.ppk
+*.pfx
+*.p12
+*.p8
 id_*
-known_hosts
-authorized_keys
+known_hosts*
+authorized_keys*
 
 # Ignore environment configs
 .env

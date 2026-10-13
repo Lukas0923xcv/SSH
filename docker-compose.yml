@@ -6,7 +6,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "8888:8888"
+      - "${WEBSSH_BIND_IP:-127.0.0.1}:${WEBSSH_PORT:-8888}:8888"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
