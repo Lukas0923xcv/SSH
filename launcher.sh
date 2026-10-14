@@ -4,7 +4,7 @@
 umask 077
 
 # Resolve application version number
-VERSION="1.3.0"
+VERSION="1.3.1"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
@@ -137,11 +137,11 @@ validate_and_parse_target() {
   return 0
 }
 
-# Sanitize nickname: allow only alphanumeric, space, dot, underscore, hyphen (max 32 chars)
+# Sanitize nickname: allow only alphanumeric, space, dot, underscore, hyphen (max 32 chars, cannot start with hyphen)
 sanitize_nickname() {
   local nick="$1"
   nick="$(printf '%s' "$nick" | tr -d '\r\n\t|' | tr -cd '[:alnum:] _.-')"
-  nick="$(printf '%s' "$nick" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  nick="$(printf '%s' "$nick" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^-*//')"
   printf '%.32s' "$nick"
 }
 
@@ -312,7 +312,7 @@ while true; do
             : > "$tmp_hosts"
           fi
           chmod 600 "$tmp_hosts" 2>/dev/null || true
-          mv -f "$tmp_hosts" "$HOSTS_FILE"
+          mv -f "$tmp_hosts" "$HOSTS_FILE" || rm -f "$tmp_hosts" 2>/dev/null || true
           echo "Removed host #$DEL_NUM."
           sleep 1
         else

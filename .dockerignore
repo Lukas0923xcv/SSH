@@ -2,6 +2,9 @@
 data/
 *.tmp
 *.log
+*.db*
+*.sqlite*
+.DS_Store
 
 # Exclude credentials and private keys
 *.pem

@@ -98,6 +98,11 @@ $SUDO chmod 700 "$APP_DIR/data"
 $SUDO touch "$APP_DIR/data/hosts.txt" "$APP_DIR/data/known_hosts" 2>/dev/null || true
 $SUDO chmod 600 "$APP_DIR/data/hosts.txt" "$APP_DIR/data/known_hosts" 2>/dev/null || true
 
+if [ ! -f "$APP_DIR/.env" ] && [ -f "$APP_DIR/.env.example" ]; then
+  $SUDO cp "$APP_DIR/.env.example" "$APP_DIR/.env"
+  $SUDO chmod 600 "$APP_DIR/.env" 2>/dev/null || true
+fi
+
 # 6. Build and launch Docker Compose stack
 echo -e "${COLOR_BLUE}[5/5] Building and launching Web SSH Center containers...${COLOR_RESET}"
 cd "$APP_DIR"
