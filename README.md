@@ -10,8 +10,8 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 - **Visible versioning**: Current application version is displayed in the web UI terminal banner and window title.
 - **Custom ports**: Supports `user@host:2222` and bracketed IPv6 `[::1]:2222`.
 - **Saved hosts**: Bookmark servers with custom friendly names with atomic, race-free storage.
-- **Safe by default**: Listens on `127.0.0.1:8888` locally by default with Cross-Site WebSocket Hijacking (CSWSH) protection and strict security headers, preventing direct internet scanning from bypassing Cloudflare Access and MFA.
-- **Security hardened**: Input sanitization preventing argument and terminal escape injection, hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), unprivileged execution, and build context isolation (`.dockerignore`).
+- **Safe by default**: Listens on `127.0.0.1:8888` locally by default with Cross-Site WebSocket Hijacking (CSWSH) protection, DNS rebinding mitigation, and strict security headers, preventing direct internet scanning from bypassing Cloudflare Access and MFA.
+- **Security hardened**: Strict input sanitization preventing argument and terminal escape injection, per-IP connection limits and session caps (`-m 10`), hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), unprivileged execution, and build context isolation (`.dockerignore`).
 - **Persistent storage**: Saved hosts, verified `known_hosts`, and SSH keys are stored in `./data`.
 
 ---
@@ -102,6 +102,16 @@ chmod +x launcher.sh
 docker compose down
 docker compose up -d --build
 ```
+
+---
+
+## Security Hardening (v1.3.2)
+
+Web SSH Center incorporates multi-layered security controls against common web-to-terminal attack vectors:
+- **CSWSH & DNS Rebinding Protection**: Nginx dynamically checks the `Origin` header against Host headers on verified local/private addresses or verified Cloudflare Tunnels (via `CF-Ray`), preventing cross-origin hijacking and DNS-rebinding exploits.
+- **Input Sanitization**: Terminal launcher inputs are verified against a strict character whitelist, preventing command substitution, shell escapes, or flag injection.
+- **DoS & Session Limits**: Per-IP connection limits in Nginx (`limit_conn 10`) and session caps in `ttyd` (`-m 10`) mitigate denial-of-service and memory exhaustion.
+- **Strict Content Security Policy**: CSP enforces `connect-src 'self'`, restricting WebSocket and HTTP connections exclusively to origin.
 
 ---
  
