@@ -4,7 +4,7 @@
 umask 077
 
 # Resolve application version number
-VERSION="1.3.1"
+VERSION="1.3.2"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
@@ -78,7 +78,8 @@ validate_and_parse_target() {
 
   # Reject any characters outside allowed safe set:
   # Allowed: alphanumeric, '.', '-', '_', '@', ':', '[', ']'
-  if [[ "$input" =~ [^a-zA-Z0-9._@:\[\]\-] ]]; then
+  local invalid_chars="[^]a-zA-Z0-9._@:[-]"
+  if [[ "$input" =~ $invalid_chars ]]; then
     echo "Error: Target contains forbidden characters."
     return 1
   fi

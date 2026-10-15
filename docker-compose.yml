@@ -37,6 +37,8 @@ services:
       - -W
       - -t
       - copyOnSelect=true
+      - -m
+      - "10"
       - bash
       - /usr/local/bin/launcher.sh
 
