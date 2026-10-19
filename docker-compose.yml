@@ -1,3 +1,10 @@
+# Rotate container logs so long-running installs cannot fill the disk
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   nginx:
     image: nginx:alpine
@@ -17,6 +24,7 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - ttyd
+    logging: *default-logging
 
   ttyd:
     build: .
@@ -26,6 +34,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Caps runaway process creation (fork bombs / many parallel sessions)
+    pids_limit: 512
     expose:
       - "7681"
     volumes:
@@ -37,10 +47,19 @@ services:
       - -W
       - -t
       - copyOnSelect=true
+      - -t
+      - fontSize=15
+      - -t
+      - cursorBlink=true
+      - -t
+      - scrollback=10000
+      - -t
+      - 'theme={"background":"#1a1b26","foreground":"#c0caf5","cursor":"#c0caf5","cursorAccent":"#1a1b26","selectionBackground":"#33467c","black":"#15161e","red":"#f7768e","green":"#9ece6a","yellow":"#e0af68","blue":"#7aa2f7","magenta":"#bb9af7","cyan":"#7dcfff","white":"#a9b1d6","brightBlack":"#414868","brightRed":"#f7768e","brightGreen":"#9ece6a","brightYellow":"#e0af68","brightBlue":"#7aa2f7","brightMagenta":"#bb9af7","brightCyan":"#7dcfff","brightWhite":"#c0caf5"}'
       - -m
       - "10"
       - bash
       - /usr/local/bin/launcher.sh
+    logging: *default-logging
 
   # Optional: Run Cloudflare Tunnel directly in Docker
   # Set TUNNEL_TOKEN in your .env file and run: docker compose --profile tunnel up -d
@@ -60,3 +79,4 @@ services:
       - nginx
     profiles:
       - tunnel
+    logging: *default-logging

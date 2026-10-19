@@ -4,7 +4,7 @@
 # Repository: https://github.com/Lukas0923xcv/SSH.git
 # ==============================================================================
 
-set -e
+set -eo pipefail
 
 COLOR_BLUE='\033[0;34m'
 COLOR_GREEN='\033[0;32m'
@@ -12,6 +12,8 @@ COLOR_YELLOW='\033[1;33m'
 COLOR_RED='\033[0;31m'
 COLOR_CYAN='\033[0;36m'
 COLOR_RESET='\033[0m'
+
+trap 'echo -e "\n${COLOR_RED}[✗] Installation failed (line ${LINENO}). See the output above for details.${COLOR_RESET}"' ERR
 
 echo -e "${COLOR_CYAN}"
 cat << "EOF"
@@ -35,17 +37,28 @@ fi
 
 # 2. Update package lists and check dependencies
 echo -e "${COLOR_BLUE}[1/5] Checking system dependencies (git, curl)...${COLOR_RESET}"
-export DEBIAN_FRONTEND=noninteractive
-$SUDO apt-get update -qq
-$SUDO apt-get install -y -qq git curl ca-certificates gnupg >/dev/null
+HAS_APT=0
+if command -v apt-get &>/dev/null; then
+  HAS_APT=1
+  export DEBIAN_FRONTEND=noninteractive
+  $SUDO apt-get update -qq
+  $SUDO apt-get install -y -qq git curl ca-certificates gnupg >/dev/null
+else
+  for dep in git curl; do
+    if ! command -v "$dep" &>/dev/null; then
+      echo -e "${COLOR_RED}[✗] '$dep' is required. Please install it with your package manager and re-run.${COLOR_RESET}"
+      exit 1
+    fi
+  done
+fi
 
 # 3. Check / Install Docker and Docker Compose
 echo -e "${COLOR_BLUE}[2/5] Checking Docker & Docker Compose...${COLOR_RESET}"
 if ! command -v docker &> /dev/null; then
   echo -e "${COLOR_YELLOW}[i] Docker is not installed. Installing Docker Engine...${COLOR_RESET}"
 
-  if $SUDO apt-get install -y docker.io docker-compose-v2 >/dev/null 2>&1 || \
-     $SUDO apt-get install -y docker.io docker-compose >/dev/null 2>&1; then
+  if [ "$HAS_APT" -eq 1 ] && { $SUDO apt-get install -y docker.io docker-compose-v2 >/dev/null 2>&1 || \
+     $SUDO apt-get install -y docker.io docker-compose >/dev/null 2>&1; }; then
     echo -e "${COLOR_GREEN}[✓] Docker installed from package repository!${COLOR_RESET}"
   else
     # Fallback to official docker installation script
@@ -57,14 +70,20 @@ else
   echo -e "${COLOR_GREEN}[✓] Docker is already installed: $(docker --version 2>/dev/null || echo 'Docker')${COLOR_RESET}"
 fi
 
-# Determine Docker Compose command
-if docker compose version &>/dev/null; then
+# Determine Docker Compose command (checked via $SUDO: non-root users may not be in the docker group yet)
+if $SUDO docker compose version &>/dev/null; then
   COMPOSE_CMD="docker compose"
 elif command -v docker-compose &>/dev/null; then
   COMPOSE_CMD="docker-compose"
 else
-  $SUDO apt-get install -y docker-compose-v2 >/dev/null 2>&1 || true
+  if [ "$HAS_APT" -eq 1 ]; then
+    $SUDO apt-get install -y docker-compose-v2 >/dev/null 2>&1 || true
+  fi
   COMPOSE_CMD="docker compose"
+  if ! $SUDO docker compose version &>/dev/null; then
+    echo -e "${COLOR_RED}[✗] Docker Compose is not available. Please install the Docker Compose plugin and re-run.${COLOR_RESET}"
+    exit 1
+  fi
 fi
 
 # 4. Clone or update repository
@@ -109,12 +128,43 @@ cd "$APP_DIR"
 $SUDO $COMPOSE_CMD down 2>/dev/null || true
 $SUDO $COMPOSE_CMD up -d --build
 
+# Read bind address from .env (falls back to the compose defaults)
+env_value() {
+  local val
+  val="$($SUDO grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"'"'"'\r ')"
+  printf '%s' "${val:-$2}"
+}
+BIND_IP="$(env_value WEBSSH_BIND_IP 127.0.0.1)"
+BIND_PORT="$(env_value WEBSSH_PORT 8888)"
+CHECK_IP="$BIND_IP"
+[ "$CHECK_IP" = "0.0.0.0" ] && CHECK_IP="127.0.0.1"
+
+# Wait until the web terminal answers
+echo -e "${COLOR_BLUE}[i] Waiting for the web terminal to come up...${COLOR_RESET}"
+HEALTHY=0
+for _ in $(seq 1 20); do
+  if curl -fsS -o /dev/null "http://${CHECK_IP}:${BIND_PORT}/" 2>/dev/null; then
+    HEALTHY=1
+    break
+  fi
+  sleep 1
+done
+if [ "$HEALTHY" -eq 1 ]; then
+  echo -e "${COLOR_GREEN}[✓] Web terminal is responding on http://${CHECK_IP}:${BIND_PORT}${COLOR_RESET}"
+else
+  echo -e "${COLOR_YELLOW}[!] Web terminal did not respond yet. Check: cd ${APP_DIR} && ${COMPOSE_CMD} logs${COLOR_RESET}"
+fi
+
 # 7. Success Banner
 echo -e "\n${COLOR_GREEN}========================================================================${COLOR_RESET}"
 echo -e "${COLOR_GREEN}  🎉 Web SSH Center is now installed and running!${COLOR_RESET}"
 echo -e "${COLOR_GREEN}========================================================================${COLOR_RESET}"
-echo -e "  🌐 Local Access:       ${COLOR_YELLOW}http://127.0.0.1:8888${COLOR_RESET} (or http://localhost:8888)"
-echo -e "  🔒 Security Mode:      ${COLOR_CYAN}Bound to 127.0.0.1 (Protected from direct public IP scans)${COLOR_RESET}"
+echo -e "  🌐 Local Access:       ${COLOR_YELLOW}http://${CHECK_IP}:${BIND_PORT}${COLOR_RESET}"
+if [ "$BIND_IP" = "127.0.0.1" ]; then
+  echo -e "  🔒 Security Mode:      ${COLOR_CYAN}Bound to 127.0.0.1 (Protected from direct public IP scans)${COLOR_RESET}"
+else
+  echo -e "  ⚠️  Security Mode:      ${COLOR_YELLOW}Bound to ${BIND_IP} – reachable from the network without Cloudflare Access!${COLOR_RESET}"
+fi
 echo -e "  📁 Persistent Data:    ${COLOR_YELLOW}${APP_DIR}/data${COLOR_RESET}"
 echo -e "  📊 View Logs:          ${COLOR_BLUE}cd ${APP_DIR} && ${COMPOSE_CMD} logs -f${COLOR_RESET}"
 echo -e "  🛑 Stop Service:       ${COLOR_BLUE}cd ${APP_DIR} && ${COMPOSE_CMD} down${COLOR_RESET}"
@@ -122,5 +172,5 @@ echo -e "  🚀 Restart Service:    ${COLOR_BLUE}cd ${APP_DIR} && ${COMPOSE_CMD}
 echo -e "  🔄 Update:             ${COLOR_BLUE}curl -sSL https://raw.githubusercontent.com/Lukas0923xcv/SSH/main/install.sh | bash${COLOR_RESET}"
 echo -e "${COLOR_GREEN}========================================================================${COLOR_RESET}"
 echo -e "${COLOR_YELLOW}  ⚠️  Cloudflare Zero Trust Reminder:${COLOR_RESET}"
-echo -e "  To access remotely, point your Cloudflare Tunnel to ${COLOR_CYAN}HTTP -> localhost:8888${COLOR_RESET}"
+echo -e "  To access remotely, point your Cloudflare Tunnel to ${COLOR_CYAN}HTTP -> localhost:${BIND_PORT}${COLOR_RESET}"
 echo -e "  and protect your public hostname with a Cloudflare Access policy (MFA).\n"

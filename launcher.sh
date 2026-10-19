@@ -4,38 +4,84 @@
 umask 077
 
 # Resolve application version number
-VERSION="1.3.2"
+VERSION="1.4.0"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
   VERSION="$(tr -d '\r\n' < "$(dirname "$0")/VERSION")"
 fi
+VERSION="${VERSION//[^a-zA-Z0-9.+-]/}"
 
 HOSTS_FILE="/data/hosts.txt"
 KNOWN_HOSTS_FILE="/data/known_hosts"
+SSH_DIR="/data/.ssh"
+KEY_FILE="$SSH_DIR/id_ed25519"
 mkdir -p /data 2>/dev/null || true
 chmod 700 /data 2>/dev/null || true
 touch "$HOSTS_FILE" "$KNOWN_HOSTS_FILE" 2>/dev/null || true
 chmod 600 "$HOSTS_FILE" "$KNOWN_HOSTS_FILE" 2>/dev/null || true
 
-# Support mounted custom SSH keys and config if available
-if [ -d "/data/.ssh" ]; then
+# Link /data/.ssh to ~/.ssh so ssh picks up mounted keys and config
+link_ssh_dir() {
   if [ ! -e "$HOME/.ssh" ]; then
-    ln -s /data/.ssh "$HOME/.ssh" 2>/dev/null || true
+    ln -s "$SSH_DIR" "$HOME/.ssh" 2>/dev/null || true
   fi
+}
+
+# Support mounted custom SSH keys and config if available
+if [ -d "$SSH_DIR" ]; then
+  link_ssh_dir
   # Fix permissions: 700 on directories, 600 on files, 644 on public keys/configs
-  chmod 700 /data/.ssh 2>/dev/null || true
-  find /data/.ssh -type d -exec chmod 700 {} + 2>/dev/null || true
-  find /data/.ssh -type f -exec chmod 600 {} + 2>/dev/null || true
-  chmod 644 /data/.ssh/*.pub /data/.ssh/config 2>/dev/null || true
+  chmod 700 "$SSH_DIR" 2>/dev/null || true
+  find "$SSH_DIR" -type d -exec chmod 700 {} + 2>/dev/null || true
+  find "$SSH_DIR" -type f -exec chmod 600 {} + 2>/dev/null || true
+  chmod 644 "$SSH_DIR"/*.pub "$SSH_DIR/config" 2>/dev/null || true
   chmod 600 "$KNOWN_HOSTS_FILE" 2>/dev/null || true
 fi
+
+# Hardened options shared by ssh and ssh-copy-id
+SSH_OPTS=(
+  -o StrictHostKeyChecking=accept-new
+  -o HashKnownHosts=yes
+  -o PermitLocalCommand=no
+  -o ForwardAgent=no
+  -o ForwardX11=no
+  -o ClearAllForwardings=yes
+  -o EnableEscapeCommandline=no
+  -o ConnectTimeout=15
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=3
+  -o "UserKnownHostsFile=$KNOWN_HOSTS_FILE"
+)
+
+# ANSI colors (the actual palette is set by the ttyd theme in docker-compose.yml)
+C_RESET=$'\033[0m'
+C_BOLD=$'\033[1m'
+C_DIM=$'\033[2m'
+C_RED=$'\033[31m'
+C_GREEN=$'\033[32m'
+C_YELLOW=$'\033[33m'
+C_BLUE=$'\033[34m'
+C_CYAN=$'\033[36m'
+
+info() { printf '  %s%s%s\n' "$C_CYAN" "$*" "$C_RESET"; }
+ok()   { printf '  %s✔ %s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
+err()  { printf '  %s✖ %s%s\n' "$C_RED" "$*" "$C_RESET"; }
+hint() { printf '  %s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
 
 # Signal handling:
 # - Ignore Ctrl+C and Ctrl+Z in menu to prevent crashing or freezing web session
 # - Clean exit on HUP/TERM
-trap 'continue' INT
-trap '' TSTP
+menu_traps() {
+  trap 'continue' INT
+  trap '' TSTP
+}
+# While a child (ssh, ssh-keygen, ...) runs, Ctrl+C must reach the child but must not
+# kill the launcher itself. A no-op handler (not '' and not '-') achieves exactly that.
+child_traps() {
+  trap ':' INT
+}
+menu_traps
 trap 'exit 0' TERM HUP
 
 # Safe prompt reader:
@@ -62,6 +108,25 @@ prompt_read() {
   fi
 }
 
+pause() {
+  echo ""
+  prompt_read "  ${C_DIM}Press Enter to return to menu...${C_RESET}" _ || true
+}
+
+confirm() {
+  local answer=""
+  prompt_read "  $1 (y/N): " answer || return 1
+  [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+# Trim leading/trailing whitespace without spawning subprocesses
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 # Validate and parse target into PARSED_USER, PARSED_HOST, PARSED_PORT
 validate_and_parse_target() {
   local input="$1"
@@ -69,10 +134,10 @@ validate_and_parse_target() {
   PARSED_HOST=""
   PARSED_PORT=""
 
-  # Trim leading/trailing whitespace
-  input="$(printf '%s' "$input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  # Trim leading/trailing whitespace and an optional leading "ssh " (pasted commands)
+  input="$(trim "$input")"
   input="${input#ssh }"
-  input="$(printf '%s' "$input" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  input="$(trim "$input")"
 
   [ -z "$input" ] && return 1
 
@@ -80,7 +145,7 @@ validate_and_parse_target() {
   # Allowed: alphanumeric, '.', '-', '_', '@', ':', '[', ']'
   local invalid_chars="[^]a-zA-Z0-9._@:[-]"
   if [[ "$input" =~ $invalid_chars ]]; then
-    echo "Error: Target contains forbidden characters."
+    err "Target contains forbidden characters."
     return 1
   fi
 
@@ -92,20 +157,20 @@ validate_and_parse_target() {
 
     # Ensure user is valid: alphanumeric/underscore/dot/dash, 1-64 chars, cannot start with hyphen
     if [ -z "$PARSED_USER" ] || [[ "$PARSED_USER" == *"@"* ]] || [[ "$PARSED_USER" =~ ^- ]] || [[ ! "$PARSED_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$ ]]; then
-      echo "Error: Invalid username in target."
+      err "Invalid username in target."
       return 1
     fi
   fi
 
   # Parse host and optional port from rest
-  if [[ "$rest" =~ ^\[([0-9a-fA-F:]+)\]:([0-9]+)$ ]]; then
+  if [[ "$rest" =~ ^\[([0-9a-fA-F:]+)\]:([0-9]{1,5})$ ]]; then
     # Bracketed IPv6 with port: [::1]:2222
     PARSED_HOST="${BASH_REMATCH[1]}"
     PARSED_PORT="${BASH_REMATCH[2]}"
   elif [[ "$rest" =~ ^\[([0-9a-fA-F:]+)\]$ ]]; then
     # Bracketed IPv6 without port: [::1]
     PARSED_HOST="${BASH_REMATCH[1]}"
-  elif [[ "$rest" =~ ^([a-zA-Z0-9.-]+):([0-9]+)$ ]]; then
+  elif [[ "$rest" =~ ^([a-zA-Z0-9.-]+):([0-9]{1,5})$ ]]; then
     # Hostname / IPv4 with port: host:2222 or 1.2.3.4:2222
     PARSED_HOST="${BASH_REMATCH[1]}"
     PARSED_PORT="${BASH_REMATCH[2]}"
@@ -116,13 +181,13 @@ validate_and_parse_target() {
     # Regular hostname or IPv4 without port
     PARSED_HOST="$rest"
   else
-    echo "Error: Malformed host format."
+    err "Malformed host format."
     return 1
   fi
 
   # Validate host: must not start with '-' or '.', must not end with '.', must not contain adjacent dots, must not be empty
   if [ -z "$PARSED_HOST" ] || [[ "$PARSED_HOST" =~ ^- ]] || [[ "$PARSED_HOST" =~ ^\. ]] || [[ "$PARSED_HOST" =~ \.$ ]] || [[ "$PARSED_HOST" == *..* ]]; then
-    echo "Error: Invalid hostname."
+    err "Invalid hostname."
     return 1
   fi
 
@@ -130,7 +195,7 @@ validate_and_parse_target() {
   if [ -n "$PARSED_PORT" ]; then
     PARSED_PORT="$(( 10#$PARSED_PORT ))"
     if [ "$PARSED_PORT" -lt 1 ] || [ "$PARSED_PORT" -gt 65535 ]; then
-      echo "Error: Port must be between 1 and 65535."
+      err "Port must be between 1 and 65535."
       return 1
     fi
   fi
@@ -138,195 +203,395 @@ validate_and_parse_target() {
   return 0
 }
 
+# Build SSH_DEST (user@host for ssh) and CANONICAL_TARGET (user@host[:port] for storage)
+# from PARSED_*. IPv6 hosts are bracketed so a stored port survives re-parsing.
+build_target_strings() {
+  SSH_DEST="$PARSED_HOST"
+  [ -n "$PARSED_USER" ] && SSH_DEST="${PARSED_USER}@${PARSED_HOST}"
+
+  local host_part="$PARSED_HOST"
+  [[ "$PARSED_HOST" == *:* ]] && host_part="[${PARSED_HOST}]"
+  CANONICAL_TARGET="$host_part"
+  [ -n "$PARSED_USER" ] && CANONICAL_TARGET="${PARSED_USER}@${host_part}"
+  [ -n "$PARSED_PORT" ] && CANONICAL_TARGET="${CANONICAL_TARGET}:${PARSED_PORT}"
+
+  PORT_ARGS=()
+  [ -n "$PARSED_PORT" ] && PORT_ARGS=(-p "$PARSED_PORT")
+}
+
 # Sanitize nickname: allow only alphanumeric, space, dot, underscore, hyphen (max 32 chars, cannot start with hyphen)
 sanitize_nickname() {
   local nick="$1"
-  nick="$(printf '%s' "$nick" | tr -d '\r\n\t|' | tr -cd '[:alnum:] _.-')"
-  nick="$(printf '%s' "$nick" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^-*//')"
-  printf '%.32s' "$nick"
+  nick="${nick//[^a-zA-Z0-9 _.-]/}"
+  while [[ "$nick" == [-\ ]* ]]; do
+    nick="${nick:1}"
+  done
+  nick="${nick:0:32}"
+  trim "$nick"
+}
+
+# Strip anything that is not a valid target character before echoing file content to the terminal
+sanitize_display() {
+  printf '%s' "${1//[^]a-zA-Z0-9._@:[-]/}"
+}
+
+# Read saved entries into ENTRIES cleanly in memory (avoiding race-prone sed -i)
+load_entries() {
+  ENTRIES=()
+  [ -f "$HOSTS_FILE" ] || return 0
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [[ -z "${line//[[:space:]]/}" ]] && continue
+    ENTRIES+=("$line")
+  done < "$HOSTS_FILE"
+}
+
+# Split a "nickname|target" line into ENTRY_NICK / ENTRY_TARGET
+split_entry() {
+  IFS="|" read -r ENTRY_NICK ENTRY_TARGET <<< "$1"
+  [ -z "$ENTRY_TARGET" ] && ENTRY_TARGET="$ENTRY_NICK"
+  ENTRY_NICK="$(sanitize_nickname "$ENTRY_NICK")"
+}
+
+# Atomically replace hosts file with the given lines
+write_entries() {
+  local tmp_hosts
+  if ! tmp_hosts="$(mktemp "${HOSTS_FILE}.XXXXXX" 2>/dev/null)"; then
+    err "Could not write $HOSTS_FILE."
+    return 1
+  fi
+  if [ $# -gt 0 ]; then
+    printf "%s\n" "$@" > "$tmp_hosts"
+  else
+    : > "$tmp_hosts"
+  fi
+  chmod 600 "$tmp_hosts" 2>/dev/null || true
+  if ! mv -f "$tmp_hosts" "$HOSTS_FILE"; then
+    rm -f "$tmp_hosts" 2>/dev/null || true
+    err "Could not write $HOSTS_FILE."
+    return 1
+  fi
+}
+
+# Is a number a valid 1-based index into ENTRIES?
+is_entry_number() {
+  [[ "$1" =~ ^[1-9][0-9]{0,4}$ ]] && [ "$1" -le "${#ENTRIES[@]}" ]
+}
+
+# Ask for a saved host number; sets PICKED_IDX and ENTRY_NICK / ENTRY_TARGET
+pick_entry() {
+  local num=""
+  if [ ${#ENTRIES[@]} -eq 0 ]; then
+    err "No saved hosts yet."
+    sleep 1
+    return 1
+  fi
+  prompt_read "  $1" num || return 1
+  if ! is_entry_number "$num"; then
+    err "Invalid selection."
+    sleep 1
+    return 1
+  fi
+  PICKED_IDX=$(( 10#$num - 1 ))
+  split_entry "${ENTRIES[$PICKED_IDX]}"
+}
+
+# Ask for a saved host number or a new target, then validate it into PARSED_*
+read_target() {
+  local input=""
+  prompt_read "  $1" input || return 1
+  input="$(trim "$input")"
+  if is_entry_number "$input"; then
+    split_entry "${ENTRIES[$(( 10#$input - 1 ))]}"
+    input="$ENTRY_TARGET"
+  fi
+  if ! validate_and_parse_target "$input"; then
+    sleep 2
+    return 1
+  fi
+  build_target_strings
 }
 
 connect_to_target() {
   local display_name="$1"
 
   # Target is already parsed into PARSED_USER, PARSED_HOST, PARSED_PORT
-  local ssh_target="$PARSED_HOST"
-  if [ -n "$PARSED_USER" ]; then
-    ssh_target="${PARSED_USER}@${PARSED_HOST}"
-  fi
-
-  local full_display="$ssh_target"
-  [ -n "$PARSED_PORT" ] && full_display="${ssh_target}:${PARSED_PORT}"
-
-  printf "Connecting to %s (%s)...\n" "$display_name" "$full_display"
-
-  # Reset SIGINT trap so Ctrl+C works normally during the SSH session
-  trap - INT
-
-  local ssh_opts=(
-    -o StrictHostKeyChecking=accept-new
-    -o HashKnownHosts=yes
-    -o PermitLocalCommand=no
-    -o ForwardAgent=no
-    -o ForwardX11=no
-    -o ClearAllForwardings=yes
-    -o EnableEscapeCommandline=no
-    -o ConnectTimeout=15
-    -o ServerAliveInterval=30
-    -o ServerAliveCountMax=3
-  )
-  if [ -d "/data" ]; then
-    ssh_opts+=(-o "UserKnownHostsFile=/data/known_hosts")
-  fi
-
-  if [ -n "$PARSED_PORT" ]; then
-    ssh "${ssh_opts[@]}" -p "$PARSED_PORT" -- "$ssh_target" || true
-  else
-    ssh "${ssh_opts[@]}" -- "$ssh_target" || true
-  fi
-
-  # Restore traps for menu
-  trap 'continue' INT
-  trap '' TSTP
+  build_target_strings
 
   echo ""
-  prompt_read "Session closed. Press Enter to return to menu..." _ || true
+  if [ "$display_name" = "$CANONICAL_TARGET" ]; then
+    printf '  Connecting to %s%s%s...\n\n' "$C_BOLD" "$display_name" "$C_RESET"
+  else
+    printf '  Connecting to %s%s%s %s(%s)%s...\n\n' "$C_BOLD" "$display_name" "$C_RESET" "$C_DIM" "$CANONICAL_TARGET" "$C_RESET"
+  fi
+
+  local rc=0
+  child_traps
+  ssh "${SSH_OPTS[@]}" "${PORT_ARGS[@]}" -- "$SSH_DEST" || rc=$?
+  menu_traps
+
+  echo ""
+  if [ "$rc" -eq 130 ]; then
+    info "Connection cancelled."
+  elif [ "$rc" -eq 255 ]; then
+    err "Connection failed (ssh exit code 255)."
+    hint "Host key changed after a reinstall? Use [f] to forget the old key."
+    hint "Using keys? Use [k] to create one and [i] to install it on the host."
+  else
+    info "Session closed."
+  fi
+  pause
+}
+
+# Connect to a new target (optionally pre-filled) and offer to save it
+connect_new() {
+  local target="$1"
+  if [ -z "$target" ]; then
+    prompt_read "  Target (user@host or user@host:port): " target || return
+  fi
+
+  if ! validate_and_parse_target "$target"; then
+    sleep 2
+    return
+  fi
+  build_target_strings
+
+  local entry already_saved=0
+  for entry in "${ENTRIES[@]}"; do
+    split_entry "$entry"
+    if [ "$ENTRY_TARGET" = "$CANONICAL_TARGET" ]; then
+      already_saved=1
+      break
+    fi
+  done
+
+  if [ "$already_saved" -eq 1 ]; then
+    hint "Already saved as '$ENTRY_NICK'."
+    connect_to_target "$ENTRY_NICK"
+    return
+  fi
+
+  local display_name="$CANONICAL_TARGET"
+  if confirm "Save this host for quick access?"; then
+    local new_nickname=""
+    prompt_read "  Nickname (empty = use target): " new_nickname || return
+    new_nickname="$(sanitize_nickname "$new_nickname")"
+    [ -z "$new_nickname" ] && new_nickname="$CANONICAL_TARGET"
+
+    printf "%s|%s\n" "$new_nickname" "$CANONICAL_TARGET" >> "$HOSTS_FILE"
+    chmod 600 "$HOSTS_FILE" 2>/dev/null || true
+    ok "Saved as '$new_nickname'."
+    display_name="$new_nickname"
+  fi
+
+  connect_to_target "$display_name"
+}
+
+rename_entry() {
+  pick_entry "Number of the host to rename: " || return
+  local new_nickname=""
+  prompt_read "  New nickname for '$ENTRY_NICK': " new_nickname || return
+  new_nickname="$(sanitize_nickname "$new_nickname")"
+  if [ -z "$new_nickname" ]; then
+    err "Nickname must not be empty."
+    sleep 1
+    return
+  fi
+  ENTRIES[PICKED_IDX]="${new_nickname}|${ENTRY_TARGET}"
+  write_entries "${ENTRIES[@]}" && ok "Renamed to '$new_nickname'."
+  sleep 1
+}
+
+delete_entry() {
+  pick_entry "Number of the host to forget: " || return
+  confirm "Really forget '$ENTRY_NICK' ($(sanitize_display "$ENTRY_TARGET"))?" || return
+  local new_entries=() i
+  for i in "${!ENTRIES[@]}"; do
+    [ "$i" -ne "$PICKED_IDX" ] && new_entries+=("${ENTRIES[$i]}")
+  done
+  write_entries "${new_entries[@]}" && ok "Removed '$ENTRY_NICK'."
+  sleep 1
+}
+
+# Create (if missing) and show the launcher's own SSH key
+manage_key() {
+  mkdir -p "$SSH_DIR" 2>/dev/null && chmod 700 "$SSH_DIR" 2>/dev/null
+  link_ssh_dir
+
+  if [ ! -f "$KEY_FILE" ]; then
+    echo ""
+    info "No key found – generating a new ed25519 key at $KEY_FILE."
+    hint "A passphrase is optional; with one you will be asked for it on every connect."
+    echo ""
+    child_traps
+    ssh-keygen -q -t ed25519 -a 64 -C "webssh@${HOSTNAME:-container}" -f "$KEY_FILE"
+    menu_traps
+    chmod 644 "$KEY_FILE.pub" 2>/dev/null || true
+  fi
+
+  echo ""
+  if [ -f "$KEY_FILE.pub" ]; then
+    printf '  %sPublic key%s %s(select to copy)%s\n\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+    printf '%s%s%s\n\n' "$C_YELLOW" "$(cat "$KEY_FILE.pub")" "$C_RESET"
+    hint "Add it to ~/.ssh/authorized_keys on your servers, or use [i] to install it automatically."
+  else
+    err "No key was created."
+  fi
+  pause
+}
+
+# Install the launcher's public key on a host via ssh-copy-id
+install_key() {
+  if [ ! -f "$KEY_FILE.pub" ]; then
+    err "No key yet. Use [k] to create one first."
+    sleep 2
+    return
+  fi
+  read_target "Host number or user@host[:port]: " || return
+
+  echo ""
+  local rc=0
+  child_traps
+  ssh-copy-id -i "$KEY_FILE.pub" "${SSH_OPTS[@]}" "${PORT_ARGS[@]}" -- "$SSH_DEST" || rc=$?
+  menu_traps
+
+  echo ""
+  if [ "$rc" -eq 0 ]; then
+    ok "Key installed on $CANONICAL_TARGET – future logins will not ask for a password."
+  else
+    err "ssh-copy-id failed (exit code $rc)."
+  fi
+  pause
+}
+
+# Remove a host's (changed) key from known_hosts
+forget_host_key() {
+  read_target "Host number or host[:port]: " || return
+
+  local key_host="$PARSED_HOST"
+  if [ -n "$PARSED_PORT" ] && [ "$PARSED_PORT" -ne 22 ]; then
+    key_host="[${PARSED_HOST}]:${PARSED_PORT}"
+  fi
+
+  local out=""
+  out="$(ssh-keygen -R "$key_host" -f "$KNOWN_HOSTS_FILE" 2>&1)"
+  rm -f "${KNOWN_HOSTS_FILE}.old" 2>/dev/null || true
+  chmod 600 "$KNOWN_HOSTS_FILE" 2>/dev/null || true
+
+  if [[ "$out" == *"found"* ]]; then
+    ok "Forgot stored key for $key_host. It will be re-learned on the next connect."
+  else
+    info "No stored key for $key_host."
+  fi
+  sleep 2
+}
+
+draw_header() {
+  local title="Web SSH Center"
+  local ver="v$VERSION"
+  local width=50
+  local pad=$(( width - 6 - ${#title} - ${#ver} ))
+  [ "$pad" -lt 1 ] && pad=1
+  local line spaces
+  printf -v line '%*s' $(( width - 2 )) ''
+  printf -v spaces '%*s' "$pad" ''
+
+  printf '\n  %s╭%s╮%s\n' "$C_BLUE" "${line// /─}" "$C_RESET"
+  printf '  %s│%s  %s%s%s%s%s%s%s  %s│%s\n' "$C_BLUE" "$C_RESET" "$C_BOLD" "$title" "$C_RESET" "$spaces" "$C_DIM" "$ver" "$C_RESET" "$C_BLUE" "$C_RESET"
+  printf '  %s╰%s╯%s\n\n' "$C_BLUE" "${line// /─}" "$C_RESET"
+}
+
+draw_hosts() {
+  printf '  %sSAVED HOSTS%s\n' "$C_BOLD" "$C_RESET"
+  if [ ${#ENTRIES[@]} -eq 0 ]; then
+    hint "No saved hosts yet – connect with [c] and choose to save it."
+    echo ""
+    return
+  fi
+  local index=1 entry
+  for entry in "${ENTRIES[@]}"; do
+    split_entry "$entry"
+    printf '  %s%3d%s  %-24s %s%s%s\n' "$C_CYAN" "$index" "$C_RESET" "$ENTRY_NICK" "$C_DIM" "$(sanitize_display "$ENTRY_TARGET")" "$C_RESET"
+    ((index++))
+  done
+  echo ""
+}
+
+draw_actions() {
+  local key_label="create SSH key"
+  [ -f "$KEY_FILE.pub" ] && key_label="show SSH key"
+  printf '  %sACTIONS%s\n' "$C_BOLD" "$C_RESET"
+  printf '  %s  c%s  %-22s %s  k%s  %s\n' "$C_CYAN" "$C_RESET" "connect to new host" "$C_CYAN" "$C_RESET" "$key_label"
+  printf '  %s  e%s  %-22s %s  i%s  %s\n' "$C_CYAN" "$C_RESET" "rename saved host" "$C_CYAN" "$C_RESET" "install key on host"
+  printf '  %s  d%s  %-22s %s  f%s  %s\n' "$C_CYAN" "$C_RESET" "delete saved host" "$C_CYAN" "$C_RESET" "forget changed host key"
+  printf '  %s  q%s  %s\n' "$C_CYAN" "$C_RESET" "quit / restart terminal"
+  echo ""
+  hint "Type a number, an action, or user@host directly."
 }
 
 while true; do
   clear
   # Set terminal window title including version number
-  printf '\033]0;SSH Proxy Launcher v%s\007' "$VERSION"
+  printf '\033]0;Web SSH Center v%s\007' "$VERSION"
 
-  local_title="SSH PROXY LAUNCHER v$VERSION"
-  echo "========================================="
-  printf "%*s\n" $(( (41 + ${#local_title}) / 2 )) "$local_title"
-  echo "========================================="
-  echo ""
+  load_entries
+  draw_header
+  draw_hosts
+  draw_actions
 
-  # Read saved entries into an array cleanly in memory (avoiding race-prone sed -i)
-  ENTRIES=()
-  if [ -f "$HOSTS_FILE" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      line="${line%$'\r'}"
-      [[ -z "${line//[[:space:]]/}" ]] && continue
-      ENTRIES+=("$line")
-    done < "$HOSTS_FILE"
+  choice=""
+  if ! prompt_read "  ${C_GREEN}›${C_RESET} " choice; then
+    continue
   fi
+  choice="$(trim "$choice")"
 
-  INDEX=1
-  if [ ${#ENTRIES[@]} -gt 0 ]; then
-    echo "Saved Hosts:"
-    for entry in "${ENTRIES[@]}"; do
-      IFS="|" read -r NICKNAME TARGET <<< "$entry"
-      NICKNAME="$(sanitize_nickname "$NICKNAME")"
-      if [ -n "$TARGET" ]; then
-        printf "  [%2d] %-20s (%s)\n" "$INDEX" "$NICKNAME" "$TARGET"
-      else
-        printf "  [%2d] %s\n" "$INDEX" "$NICKNAME"
+  if [[ "$choice" =~ ^[0-9]+$ ]]; then
+    if is_entry_number "$choice"; then
+      split_entry "${ENTRIES[$(( 10#$choice - 1 ))]}"
+      if ! validate_and_parse_target "$ENTRY_TARGET"; then
+        err "Saved target contains invalid characters or format."
+        sleep 2
+        continue
       fi
-      ((INDEX++))
-    done
-    echo ""
-  fi
-
-  echo "Options:"
-  echo "  [ c ] Connect to a new host (user@host or user@host:port)"
-  echo "  [ d ] Delete / forget a saved host"
-  echo "  [ q ] Quit / Restart terminal"
-  echo ""
-  if ! prompt_read "Select an option: " choice; then
+      connect_to_target "$ENTRY_NICK"
+    else
+      err "Invalid selection."
+      sleep 1
+    fi
     continue
   fi
 
   case "$choice" in
-    [1-9]*)
-      if [[ "$choice" =~ ^[1-9][0-9]*$ ]] && [ "$choice" -le "${#ENTRIES[@]}" ]; then
-        SELECTED_ENTRY="${ENTRIES[$(( 10#$choice - 1 ))]}"
-        IFS="|" read -r NICKNAME TARGET <<< "$SELECTED_ENTRY"
-        [ -z "$TARGET" ] && TARGET="$NICKNAME"
-
-        if ! validate_and_parse_target "$TARGET"; then
-          echo "Error: Saved target contains invalid characters or format."
-          sleep 2
-          continue
-        fi
-
-        connect_to_target "$NICKNAME"
-      else
-        echo "Invalid selection."
-        sleep 1
-      fi
+    "")
       ;;
     [cC])
-      if ! prompt_read "Enter target (user@host or user@host:port): " NEW_TARGET; then
-        continue
-      fi
-
-      if ! validate_and_parse_target "$NEW_TARGET"; then
-        sleep 2
-        continue
-      fi
-
-      # Construct canonical target string
-      CANONICAL_TARGET="$PARSED_HOST"
-      [ -n "$PARSED_USER" ] && CANONICAL_TARGET="${PARSED_USER}@${PARSED_HOST}"
-      [ -n "$PARSED_PORT" ] && CANONICAL_TARGET="${CANONICAL_TARGET}:${PARSED_PORT}"
-
-      if ! prompt_read "Save this host for future quick access? (y/n): " SAVE_CHOICE; then
-        continue
-      fi
-
-      if [[ "$SAVE_CHOICE" =~ ^[Yy]$ ]]; then
-        if ! prompt_read "Enter a nickname (or leave empty to use target): " NEW_NICKNAME; then
-          continue
-        fi
-        NEW_NICKNAME="$(sanitize_nickname "$NEW_NICKNAME")"
-        [ -z "$NEW_NICKNAME" ] && NEW_NICKNAME="$CANONICAL_TARGET"
-
-        printf "%s|%s\n" "$NEW_NICKNAME" "$CANONICAL_TARGET" >> "$HOSTS_FILE"
-        chmod 600 "$HOSTS_FILE" 2>/dev/null || true
-      fi
-
-      connect_to_target "$CANONICAL_TARGET"
+      connect_new ""
+      ;;
+    [eE])
+      rename_entry
       ;;
     [dD])
-      if [ ${#ENTRIES[@]} -eq 0 ]; then
-        echo "No saved hosts to delete."
-        sleep 1
-      else
-        if ! prompt_read "Enter the number of the host to forget: " DEL_NUM; then
-          continue
-        fi
-        if [[ "$DEL_NUM" =~ ^[1-9][0-9]*$ ]] && [ "$DEL_NUM" -le "${#ENTRIES[@]}" ]; then
-          del_idx=$(( 10#$DEL_NUM - 1 ))
-          new_entries=()
-          for i in "${!ENTRIES[@]}"; do
-            if [ "$i" -ne "$del_idx" ]; then
-              new_entries+=("${ENTRIES[$i]}")
-            fi
-          done
-          tmp_hosts="$(mktemp "${HOSTS_FILE}.XXXXXX" 2>/dev/null || mktemp /tmp/hosts.XXXXXX)"
-          if [ ${#new_entries[@]} -gt 0 ]; then
-            printf "%s\n" "${new_entries[@]}" > "$tmp_hosts"
-          else
-            : > "$tmp_hosts"
-          fi
-          chmod 600 "$tmp_hosts" 2>/dev/null || true
-          mv -f "$tmp_hosts" "$HOSTS_FILE" || rm -f "$tmp_hosts" 2>/dev/null || true
-          echo "Removed host #$DEL_NUM."
-          sleep 1
-        else
-          echo "Invalid selection."
-          sleep 1
-        fi
-      fi
+      delete_entry
+      ;;
+    [kK])
+      manage_key
+      ;;
+    [iI])
+      install_key
+      ;;
+    [fF])
+      forget_host_key
       ;;
     [qQ])
       exit 0
       ;;
+    *[@.:]*)
+      # Quick connect: user@host typed directly at the menu prompt
+      connect_new "$choice"
+      ;;
     *)
-      echo "Invalid input."
+      err "Invalid input."
       sleep 1
       ;;
   esac

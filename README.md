@@ -6,12 +6,15 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 
 ## Features
 
-- **Quick menu**: Connect by typing `user@host` or pick from your saved list.
-- **Visible versioning**: Current application version is displayed in the web UI terminal banner and window title.
+- **Quick menu**: Pick a saved host by number, or type `user@host` straight into the menu prompt.
+- **Built-in key management**: Create an ed25519 key (`k`) and push it to a server with `ssh-copy-id` (`i`) – no more passwords.
+- **Host key reset**: Server reinstalled? Forget its stored host key (`f`) instead of editing `known_hosts` by hand.
+- **Saved hosts**: Bookmark, rename (`e`) and delete (`d`) servers with friendly nicknames, stored atomically and race-free.
 - **Custom ports**: Supports `user@host:2222` and bracketed IPv6 `[::1]:2222`.
-- **Saved hosts**: Bookmark servers with custom friendly names with atomic, race-free storage.
+- **Polished terminal**: Dark color theme, 10k lines of scrollback, copy-on-select and a gzip-compressed web client (~200 KB instead of ~720 KB).
+- **Visible versioning**: Current application version is displayed in the web UI header and window title.
 - **Safe by default**: Listens on `127.0.0.1:8888` locally by default with Cross-Site WebSocket Hijacking (CSWSH) protection, DNS rebinding mitigation, and strict security headers, preventing direct internet scanning from bypassing Cloudflare Access and MFA.
-- **Security hardened**: Strict input sanitization preventing argument and terminal escape injection, per-IP connection limits and session caps (`-m 10`), hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), unprivileged execution, and build context isolation (`.dockerignore`).
+- **Security hardened**: Strict input sanitization preventing argument and terminal escape injection, per-IP connection limits and session caps (`-m 10`), hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), all Linux capabilities dropped with `no-new-privileges`, process limits, and build context isolation (`.dockerignore`).
 - **Persistent storage**: Saved hosts, verified `known_hosts`, and SSH keys are stored in `./data`.
 
 ---
@@ -78,10 +81,41 @@ In the Zero Trust dashboard under **Access > Applications**, create an applicati
 
 ---
 
+## Using the Menu
+
+```
+  ╭────────────────────────────────────────────────╮
+  │  Web SSH Center                        v1.4.0  │
+  ╰────────────────────────────────────────────────╯
+
+  SAVED HOSTS
+    1  Prod Web                 root@10.0.0.5
+    2  NAS                      admin@[fd00::2]:2222
+
+  ACTIONS
+    c  connect to new host      k  show SSH key
+    e  rename saved host        i  install key on host
+    d  delete saved host        f  forget changed host key
+    q  quit / restart terminal
+```
+
+| Input | Action |
+|-------|--------|
+| `1`, `2`, … | Connect to a saved host |
+| `user@host[:port]` | Quick connect (offers to save it) |
+| `c` | Connect to a new host |
+| `e` / `d` | Rename / delete a saved host |
+| `k` | Create (first time) and show the launcher's public SSH key |
+| `i` | Install that key on a host via `ssh-copy-id` (asks for the password once) |
+| `f` | Forget a host's stored key after a server reinstall ("REMOTE HOST IDENTIFICATION HAS CHANGED") |
+| `q` | Quit / restart the terminal |
+
+`Ctrl+C` cancels any prompt – including the SSH password prompt – and brings you back to the menu without killing the web session.
+
 ## Tips & Custom Keys
 
-- **SSH Keys:** If you want to use private keys instead of typing passwords, create a `.ssh` directory in `data/` (`./data/.ssh/`) and drop your keys there (e.g. `id_ed25519`). The container will pick them up automatically.
-- **Saved Hosts:** Your list is stored in plain text at `data/hosts.txt`. You can edit or back it up whenever you want.
+- **SSH Keys:** The easiest way is `k` → `i` in the menu. You can also drop existing keys (e.g. `id_ed25519`) into `./data/.ssh/`; the container picks them up automatically and fixes their permissions.
+- **Saved Hosts:** Your list is stored in plain text at `data/hosts.txt` (`nickname|user@host:port`). You can edit or back it up whenever you want.
 
 ---
 
@@ -105,18 +139,36 @@ docker compose up -d --build
 
 ---
 
-## Security Hardening (v1.3.2)
+## Security Hardening
 
 Web SSH Center incorporates multi-layered security controls against common web-to-terminal attack vectors:
 - **CSWSH & DNS Rebinding Protection**: Nginx dynamically checks the `Origin` header against Host headers on verified local/private addresses or verified Cloudflare Tunnels (via `CF-Ray`), preventing cross-origin hijacking and DNS-rebinding exploits.
 - **Input Sanitization**: Terminal launcher inputs are verified against a strict character whitelist, preventing command substitution, shell escapes, or flag injection.
 - **DoS & Session Limits**: Per-IP connection limits in Nginx (`limit_conn 10`) and session caps in `ttyd` (`-m 10`) mitigate denial-of-service and memory exhaustion.
 - **Strict Content Security Policy**: CSP enforces `connect-src 'self'`, restricting WebSocket and HTTP connections exclusively to origin.
+- **Resource Limits**: The terminal container is capped at 512 processes and all container logs are rotated (3 × 10 MB).
+
+---
+
+## Changelog
+
+### v1.4.0
+- **New:** Key management – create an ed25519 key (`k`) and install it on servers via `ssh-copy-id` (`i`).
+- **New:** Forget a changed host key (`f`), rename saved hosts (`e`), quick connect by typing `user@host` at the menu prompt.
+- **New:** Redesigned menu and dark terminal theme, larger scrollback, delete confirmation, duplicate detection when saving.
+- **Fix:** Saved IPv6 hosts with a port (`[::1]:2222`) lost their port after being reloaded.
+- **Fix:** `Ctrl+C` at the SSH password prompt terminated the whole web session.
+- **Fix:** Installer detected Docker Compose without `sudo`, supports non-apt systems, checks that the service is up and shows the configured bind address.
+- **Perf:** nginx gzip for the web client (~720 KB → ~200 KB); launcher menu no longer spawns subprocesses per saved host.
+- **Ops:** Container log rotation, process limit for the terminal container, UTF-8 locale in the image.
+
+### v1.3.2
+- CSWSH / DNS-rebinding protection, stricter target parsing and DoS limits.
 
 ---
  
 ## Development & AI Guidelines
  
-This repository enforces automated AI guidelines documented in [`AGENTS.md`](file:///AGENTS.md) and [`GEMINI.md`](file:///GEMINI.md).
-Whenever modifications, features, or security patches are introduced, the canonical version must be incremented in [`VERSION`](file:///VERSION) following Semantic Versioning.
+This repository enforces automated AI guidelines documented in [`AGENTS.md`](AGENTS.md) and [`GEMINI.md`](GEMINI.md).
+Whenever modifications, features, or security patches are introduced, the canonical version must be incremented in [`VERSION`](VERSION) following Semantic Versioning.
 
