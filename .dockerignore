@@ -27,3 +27,6 @@ authorized_keys*
 .gitignore
 .gitattributes
 .agents/
+
+# Exclude generated web login credentials
+nginx/htpasswd
