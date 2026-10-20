@@ -4,7 +4,7 @@
 umask 077
 
 # Resolve application version number
-VERSION="1.4.0"
+VERSION="1.4.1"
 if [ -f "/etc/webssh-version" ]; then
   VERSION="$(tr -d '\r\n' < "/etc/webssh-version")"
 elif [ -f "$(dirname "$0")/VERSION" ]; then
@@ -54,20 +54,15 @@ SSH_OPTS=(
   -o "UserKnownHostsFile=$KNOWN_HOSTS_FILE"
 )
 
-# ANSI colors (the actual palette is set by the ttyd theme in docker-compose.yml)
+# ANSI colors, used sparingly: errors in red, confirmations in green
 C_RESET=$'\033[0m'
-C_BOLD=$'\033[1m'
-C_DIM=$'\033[2m'
 C_RED=$'\033[31m'
 C_GREEN=$'\033[32m'
-C_YELLOW=$'\033[33m'
-C_BLUE=$'\033[34m'
-C_CYAN=$'\033[36m'
 
-info() { printf '  %s%s%s\n' "$C_CYAN" "$*" "$C_RESET"; }
-ok()   { printf '  %s✔ %s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
-err()  { printf '  %s✖ %s%s\n' "$C_RED" "$*" "$C_RESET"; }
-hint() { printf '  %s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+info() { printf '%s\n' "$*"; }
+ok()   { printf '%s%s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
+err()  { printf '%sError: %s%s\n' "$C_RED" "$*" "$C_RESET"; }
+hint() { printf '%s\n' "$*"; }
 
 # Signal handling:
 # - Ignore Ctrl+C and Ctrl+Z in menu to prevent crashing or freezing web session
@@ -110,12 +105,12 @@ prompt_read() {
 
 pause() {
   echo ""
-  prompt_read "  ${C_DIM}Press Enter to return to menu...${C_RESET}" _ || true
+  prompt_read "Press Enter to return to menu..." _ || true
 }
 
 confirm() {
   local answer=""
-  prompt_read "  $1 (y/N): " answer || return 1
+  prompt_read "$1 (y/N): " answer || return 1
   [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
@@ -287,7 +282,7 @@ pick_entry() {
     sleep 1
     return 1
   fi
-  prompt_read "  $1" num || return 1
+  prompt_read "$1" num || return 1
   if ! is_entry_number "$num"; then
     err "Invalid selection."
     sleep 1
@@ -300,7 +295,7 @@ pick_entry() {
 # Ask for a saved host number or a new target, then validate it into PARSED_*
 read_target() {
   local input=""
-  prompt_read "  $1" input || return 1
+  prompt_read "$1" input || return 1
   input="$(trim "$input")"
   if is_entry_number "$input"; then
     split_entry "${ENTRIES[$(( 10#$input - 1 ))]}"
@@ -321,9 +316,9 @@ connect_to_target() {
 
   echo ""
   if [ "$display_name" = "$CANONICAL_TARGET" ]; then
-    printf '  Connecting to %s%s%s...\n\n' "$C_BOLD" "$display_name" "$C_RESET"
+    printf 'Connecting to %s...\n\n' "$display_name"
   else
-    printf '  Connecting to %s%s%s %s(%s)%s...\n\n' "$C_BOLD" "$display_name" "$C_RESET" "$C_DIM" "$CANONICAL_TARGET" "$C_RESET"
+    printf 'Connecting to %s (%s)...\n\n' "$display_name" "$CANONICAL_TARGET"
   fi
 
   local rc=0
@@ -348,7 +343,7 @@ connect_to_target() {
 connect_new() {
   local target="$1"
   if [ -z "$target" ]; then
-    prompt_read "  Target (user@host or user@host:port): " target || return
+    prompt_read "Target (user@host or user@host:port): " target || return
   fi
 
   if ! validate_and_parse_target "$target"; then
@@ -375,7 +370,7 @@ connect_new() {
   local display_name="$CANONICAL_TARGET"
   if confirm "Save this host for quick access?"; then
     local new_nickname=""
-    prompt_read "  Nickname (empty = use target): " new_nickname || return
+    prompt_read "Nickname (empty = use target): " new_nickname || return
     new_nickname="$(sanitize_nickname "$new_nickname")"
     [ -z "$new_nickname" ] && new_nickname="$CANONICAL_TARGET"
 
@@ -391,7 +386,7 @@ connect_new() {
 rename_entry() {
   pick_entry "Number of the host to rename: " || return
   local new_nickname=""
-  prompt_read "  New nickname for '$ENTRY_NICK': " new_nickname || return
+  prompt_read "New nickname for '$ENTRY_NICK': " new_nickname || return
   new_nickname="$(sanitize_nickname "$new_nickname")"
   if [ -z "$new_nickname" ]; then
     err "Nickname must not be empty."
@@ -432,8 +427,8 @@ manage_key() {
 
   echo ""
   if [ -f "$KEY_FILE.pub" ]; then
-    printf '  %sPublic key%s %s(select to copy)%s\n\n' "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
-    printf '%s%s%s\n\n' "$C_YELLOW" "$(cat "$KEY_FILE.pub")" "$C_RESET"
+    printf 'Public key (select to copy):\n\n'
+    printf '%s\n\n' "$(cat "$KEY_FILE.pub")"
     hint "Add it to ~/.ssh/authorized_keys on your servers, or use [i] to install it automatically."
   else
     err "No key was created."
@@ -487,47 +482,39 @@ forget_host_key() {
   sleep 2
 }
 
-draw_header() {
-  local title="Web SSH Center"
-  local ver="v$VERSION"
-  local width=50
-  local pad=$(( width - 6 - ${#title} - ${#ver} ))
-  [ "$pad" -lt 1 ] && pad=1
-  local line spaces
-  printf -v line '%*s' $(( width - 2 )) ''
-  printf -v spaces '%*s' "$pad" ''
+MENU_RULE="================================================="
 
-  printf '\n  %s╭%s╮%s\n' "$C_BLUE" "${line// /─}" "$C_RESET"
-  printf '  %s│%s  %s%s%s%s%s%s%s  %s│%s\n' "$C_BLUE" "$C_RESET" "$C_BOLD" "$title" "$C_RESET" "$spaces" "$C_DIM" "$ver" "$C_RESET" "$C_BLUE" "$C_RESET"
-  printf '  %s╰%s╯%s\n\n' "$C_BLUE" "${line// /─}" "$C_RESET"
+draw_header() {
+  local title="WEB SSH CENTER  v$VERSION"
+  echo "$MENU_RULE"
+  printf "%*s\n" $(( (${#MENU_RULE} + ${#title}) / 2 )) "$title"
+  echo "$MENU_RULE"
+  echo ""
 }
 
 draw_hosts() {
-  printf '  %sSAVED HOSTS%s\n' "$C_BOLD" "$C_RESET"
+  echo "Saved Hosts:"
   if [ ${#ENTRIES[@]} -eq 0 ]; then
-    hint "No saved hosts yet – connect with [c] and choose to save it."
+    echo "  (none yet - use [ c ] and choose to save the host)"
     echo ""
     return
   fi
   local index=1 entry
   for entry in "${ENTRIES[@]}"; do
     split_entry "$entry"
-    printf '  %s%3d%s  %-24s %s%s%s\n' "$C_CYAN" "$index" "$C_RESET" "$ENTRY_NICK" "$C_DIM" "$(sanitize_display "$ENTRY_TARGET")" "$C_RESET"
+    printf "  [%2d] %-20s %s\n" "$index" "$ENTRY_NICK" "$(sanitize_display "$ENTRY_TARGET")"
     ((index++))
   done
   echo ""
 }
 
 draw_actions() {
-  local key_label="create SSH key"
-  [ -f "$KEY_FILE.pub" ] && key_label="show SSH key"
-  printf '  %sACTIONS%s\n' "$C_BOLD" "$C_RESET"
-  printf '  %s  c%s  %-22s %s  k%s  %s\n' "$C_CYAN" "$C_RESET" "connect to new host" "$C_CYAN" "$C_RESET" "$key_label"
-  printf '  %s  e%s  %-22s %s  i%s  %s\n' "$C_CYAN" "$C_RESET" "rename saved host" "$C_CYAN" "$C_RESET" "install key on host"
-  printf '  %s  d%s  %-22s %s  f%s  %s\n' "$C_CYAN" "$C_RESET" "delete saved host" "$C_CYAN" "$C_RESET" "forget changed host key"
-  printf '  %s  q%s  %s\n' "$C_CYAN" "$C_RESET" "quit / restart terminal"
+  echo "Options:"
+  echo "  [ c ] Connect to a new host"
+  echo "  [ e ] Rename   [ d ] Delete   [ f ] Forget host key"
+  echo "  [ k ] SSH key  [ i ] Install key on host"
+  echo "  [ q ] Quit"
   echo ""
-  hint "Type a number, an action, or user@host directly."
 }
 
 while true; do
@@ -541,7 +528,7 @@ while true; do
   draw_actions
 
   choice=""
-  if ! prompt_read "  ${C_GREEN}›${C_RESET} " choice; then
+  if ! prompt_read "Select an option: " choice; then
     continue
   fi
   choice="$(trim "$choice")"

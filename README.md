@@ -11,8 +11,8 @@ Built with Docker, `ttyd`, and Nginx. It gives you an interactive menu to connec
 - **Host key reset**: Server reinstalled? Forget its stored host key (`f`) instead of editing `known_hosts` by hand.
 - **Saved hosts**: Bookmark, rename (`e`) and delete (`d`) servers with friendly nicknames, stored atomically and race-free.
 - **Custom ports**: Supports `user@host:2222` and bracketed IPv6 `[::1]:2222`.
-- **Polished terminal**: Dark color theme, 10k lines of scrollback, copy-on-select and a gzip-compressed web client (~200 KB instead of ~720 KB).
-- **Visible versioning**: Current application version is displayed in the web UI header and window title.
+- **Fast web terminal**: 10k lines of scrollback, copy-on-select and a gzip-compressed web client (~200 KB instead of ~720 KB).
+- **Visible versioning**: Current application version is displayed in the menu header and window title.
 - **Safe by default**: Listens on `127.0.0.1:8888` locally by default with Cross-Site WebSocket Hijacking (CSWSH) protection, DNS rebinding mitigation, and strict security headers, preventing direct internet scanning from bypassing Cloudflare Access and MFA.
 - **Security hardened**: Strict input sanitization preventing argument and terminal escape injection, per-IP connection limits and session caps (`-m 10`), hashed known hosts (`HashKnownHosts`), command-line escape disabled (`EnableEscapeCommandline=no`), all Linux capabilities dropped with `no-new-privileges`, process limits, and build context isolation (`.dockerignore`).
 - **Persistent storage**: Saved hosts, verified `known_hosts`, and SSH keys are stored in `./data`.
@@ -84,19 +84,21 @@ In the Zero Trust dashboard under **Access > Applications**, create an applicati
 ## Using the Menu
 
 ```
-  ╭────────────────────────────────────────────────╮
-  │  Web SSH Center                        v1.4.0  │
-  ╰────────────────────────────────────────────────╯
+=================================================
+            WEB SSH CENTER  v1.4.1
+=================================================
 
-  SAVED HOSTS
-    1  Prod Web                 root@10.0.0.5
-    2  NAS                      admin@[fd00::2]:2222
+Saved Hosts:
+  [ 1] Prod Web             root@10.0.0.5
+  [ 2] NAS                  admin@[fd00::2]:2222
 
-  ACTIONS
-    c  connect to new host      k  show SSH key
-    e  rename saved host        i  install key on host
-    d  delete saved host        f  forget changed host key
-    q  quit / restart terminal
+Options:
+  [ c ] Connect to a new host
+  [ e ] Rename   [ d ] Delete   [ f ] Forget host key
+  [ k ] SSH key  [ i ] Install key on host
+  [ q ] Quit
+
+Select an option:
 ```
 
 | Input | Action |
@@ -152,10 +154,13 @@ Web SSH Center incorporates multi-layered security controls against common web-t
 
 ## Changelog
 
+### v1.4.1
+- **Design:** Back to the classic, plain menu layout (`====` rules, `[ c ]` options) and ttyd's default terminal colors.
+
 ### v1.4.0
 - **New:** Key management – create an ed25519 key (`k`) and install it on servers via `ssh-copy-id` (`i`).
 - **New:** Forget a changed host key (`f`), rename saved hosts (`e`), quick connect by typing `user@host` at the menu prompt.
-- **New:** Redesigned menu and dark terminal theme, larger scrollback, delete confirmation, duplicate detection when saving.
+- **New:** Redesigned menu and dark terminal theme (reverted in v1.4.1), larger scrollback, delete confirmation, duplicate detection when saving.
 - **Fix:** Saved IPv6 hosts with a port (`[::1]:2222`) lost their port after being reloaded.
 - **Fix:** `Ctrl+C` at the SSH password prompt terminated the whole web session.
 - **Fix:** Installer detected Docker Compose without `sudo`, supports non-apt systems, checks that the service is up and shows the configured bind address.
