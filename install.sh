@@ -36,15 +36,15 @@ else
 fi
 
 # 2. Update package lists and check dependencies
-echo -e "${COLOR_BLUE}[1/5] Checking system dependencies (git, curl)...${COLOR_RESET}"
+echo -e "${COLOR_BLUE}[1/5] Checking system dependencies (git, curl, openssl)...${COLOR_RESET}"
 HAS_APT=0
 if command -v apt-get &>/dev/null; then
   HAS_APT=1
   export DEBIAN_FRONTEND=noninteractive
   $SUDO apt-get update -qq
-  $SUDO apt-get install -y -qq git curl ca-certificates gnupg >/dev/null
+  $SUDO apt-get install -y -qq git curl ca-certificates gnupg openssl >/dev/null
 else
-  for dep in git curl; do
+  for dep in git curl openssl; do
     if ! command -v "$dep" &>/dev/null; then
       echo -e "${COLOR_RED}[✗] '$dep' is required. Please install it with your package manager and re-run.${COLOR_RESET}"
       exit 1
@@ -122,6 +122,24 @@ if [ ! -f "$APP_DIR/.env" ] && [ -f "$APP_DIR/.env.example" ]; then
   $SUDO chmod 600 "$APP_DIR/.env" 2>/dev/null || true
 fi
 
+# Generate the web login (nginx basic auth) on first install.
+# The password is random and shown only once; the file stores an apr1 hash.
+HTPASSWD_FILE="$APP_DIR/nginx/htpasswd"
+WEB_USER=""
+WEB_PASS=""
+if [ -d "$HTPASSWD_FILE" ]; then
+  # Docker creates an empty directory when the bind-mount source is missing
+  $SUDO rmdir "$HTPASSWD_FILE" 2>/dev/null || true
+fi
+if [ ! -s "$HTPASSWD_FILE" ]; then
+  WEB_USER="webssh"
+  WEB_PASS="$(openssl rand -base64 24 | tr -d '/+=\n' | cut -c1-24)"
+  WEB_HASH="$(printf '%s' "$WEB_PASS" | openssl passwd -apr1 -stdin)"
+  printf '%s:%s\n' "$WEB_USER" "$WEB_HASH" | $SUDO tee "$HTPASSWD_FILE" >/dev/null
+  # Readable by the nginx worker user inside the container; contains only a hash
+  $SUDO chmod 644 "$HTPASSWD_FILE"
+fi
+
 # 6. Build and launch Docker Compose stack
 echo -e "${COLOR_BLUE}[5/5] Building and launching Web SSH Center containers...${COLOR_RESET}"
 cd "$APP_DIR"
@@ -139,11 +157,12 @@ BIND_PORT="$(env_value WEBSSH_PORT 8888)"
 CHECK_IP="$BIND_IP"
 [ "$CHECK_IP" = "0.0.0.0" ] && CHECK_IP="127.0.0.1"
 
-# Wait until the web terminal answers
+# Wait until the web terminal answers (401 is expected: the web login is required)
 echo -e "${COLOR_BLUE}[i] Waiting for the web terminal to come up...${COLOR_RESET}"
 HEALTHY=0
 for _ in $(seq 1 20); do
-  if curl -fsS -o /dev/null "http://${CHECK_IP}:${BIND_PORT}/" 2>/dev/null; then
+  HTTP_CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: 127.0.0.1:${BIND_PORT}" "http://${CHECK_IP}:${BIND_PORT}/" 2>/dev/null || true)"
+  if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "200" ]; then
     HEALTHY=1
     break
   fi
@@ -171,6 +190,14 @@ echo -e "  🛑 Stop Service:       ${COLOR_BLUE}cd ${APP_DIR} && ${COMPOSE_CMD}
 echo -e "  🚀 Restart Service:    ${COLOR_BLUE}cd ${APP_DIR} && ${COMPOSE_CMD} restart${COLOR_RESET}"
 echo -e "  🔄 Update:             ${COLOR_BLUE}curl -sSL https://raw.githubusercontent.com/Lukas0923xcv/SSH/main/install.sh | bash${COLOR_RESET}"
 echo -e "${COLOR_GREEN}========================================================================${COLOR_RESET}"
+if [ -n "$WEB_PASS" ]; then
+  echo -e "${COLOR_YELLOW}  🔑 Web login (shown only once, store it in your password manager):${COLOR_RESET}"
+  echo -e "     Username: ${COLOR_CYAN}${WEB_USER}${COLOR_RESET}"
+  echo -e "     Password: ${COLOR_CYAN}${WEB_PASS}${COLOR_RESET}"
+  echo -e "  To reset it, delete ${APP_DIR}/nginx/htpasswd and run the installer again."
+  echo -e "${COLOR_GREEN}========================================================================${COLOR_RESET}"
+fi
 echo -e "${COLOR_YELLOW}  ⚠️  Cloudflare Zero Trust Reminder:${COLOR_RESET}"
-echo -e "  To access remotely, point your Cloudflare Tunnel to ${COLOR_CYAN}HTTP -> localhost:${BIND_PORT}${COLOR_RESET}"
-echo -e "  and protect your public hostname with a Cloudflare Access policy (MFA).\n"
+echo -e "  To access remotely, run cloudflared on this host, point your Cloudflare Tunnel to"
+echo -e "  ${COLOR_CYAN}HTTP -> localhost:${BIND_PORT}${COLOR_RESET}, set WEBSSH_PUBLIC_HOST in ${APP_DIR}/.env to your public"
+echo -e "  hostname, and protect that hostname with a Cloudflare Access policy (MFA).\n"
