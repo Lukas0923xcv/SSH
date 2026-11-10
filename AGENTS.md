@@ -13,11 +13,15 @@ The version number is loaded dynamically by [launcher.sh](launcher.sh) from `/et
 
 ## Security Invariants (DO NOT VIOLATE)
 
-1. **CSWSH Protection**:
-   - In [nginx/default.conf](nginx/default.conf), origin validation must compare the origin's host against `$http_host` using dynamic concatenation and backreference regexes.
-   - Do NOT use variables directly in `map` keys (e.g. `~*^https?://$http_host$`), as Nginx `map` keys do not interpolate runtime variables.
-   - Always forward `proxy_set_header Host $http_host;` so that backend origin checks (like `ttyd -O`) receive the correct port.
+1. **CSWSH, DNS-Rebinding & Authentication**:
+   - [nginx/default.conf.template](nginx/default.conf.template) is rendered by the nginx image's envsubst entrypoint. Keep `NGINX_ENVSUBST_FILTER=^WEBSSH_` in `docker-compose.yml` so only `${WEBSSH_*}` values are substituted and Nginx variables stay intact.
+   - The `Host` header (port stripped) must match an exact allowlist: `localhost`, `127.0.0.1`, `[::1]` and `${WEBSSH_PUBLIC_HOST}`. Never compare Origin against the request's own `Host`, because a rebound attacker domain controls both. Never allow private-LAN Host ranges.
+   - The `Origin` header must match the FULL origin exactly (scheme + host + port): `https://${WEBSSH_PUBLIC_HOST}` or `http://<localhost|127.0.0.1|[::1]>:${WEBSSH_PORT}`. An absent Origin is allowed. Never compare hostnames only, never cross-allow loopback names on arbitrary ports, and never trust client-supplied headers such as `X-Forwarded-Host` or `CF-Ray`.
+   - Do NOT use runtime Nginx variables in `map` keys; they are not interpolated. Template `${WEBSSH_*}` values are literal after rendering and are fine.
+   - Keep `auth_basic` with `auth_basic_user_file /etc/nginx/webssh.htpasswd` on `location /`. It must fail closed when the file is missing, and the password must never be committed (`nginx/htpasswd` is ignored by git and docker).
+   - Always forward `proxy_set_header Host $http_host;`, and strip `Authorization` before proxying to ttyd.
    - Disallow `Origin: null` (cross-origin sandboxed iframe attacks).
+   - Never suggest binding to a LAN IP or `0.0.0.0` in documentation; tunnels must target `localhost:8888` on the same host.
 
 2. **Input Validation & Sanitization**:
    - In [launcher.sh](launcher.sh), all target inputs must pass `validate_and_parse_target` before any SSH connection is attempted.

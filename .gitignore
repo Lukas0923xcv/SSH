@@ -21,3 +21,6 @@ authorized_keys*
 .env
 .env.*
 !.env.example
+
+# Ignore generated web login credentials
+nginx/htpasswd
