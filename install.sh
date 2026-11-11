@@ -122,6 +122,42 @@ if [ ! -f "$APP_DIR/.env" ] && [ -f "$APP_DIR/.env.example" ]; then
   $SUDO chmod 600 "$APP_DIR/.env" 2>/dev/null || true
 fi
 
+# Make sure WEBSSH_PUBLIC_HOST is set. Without it nginx only accepts localhost and
+# every request through the tunnel gets 403. Order: existing .env value, then the
+# WEBSSH_PUBLIC_HOST environment variable, then a prompt on the terminal (works with curl | bash).
+env_get() {
+  $SUDO grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"'"'"'\r ' || true
+}
+valid_public_host() {
+  [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]] \
+    && [[ ! "$1" =~ ^(localhost|127\.0\.0\.1)$ ]]
+}
+PUBLIC_HOST="$(env_get WEBSSH_PUBLIC_HOST)"
+if [ -z "$PUBLIC_HOST" ]; then
+  CANDIDATE="${WEBSSH_PUBLIC_HOST:-}"
+  if [ -z "$CANDIDATE" ] && [ -r /dev/tty ] && { : < /dev/tty; } 2>/dev/null; then
+    echo -e "${COLOR_YELLOW}[?] Public hostname of your Cloudflare Tunnel (e.g. ssh.example.com), empty = local only:${COLOR_RESET}"
+    read -r CANDIDATE < /dev/tty || CANDIDATE=""
+  fi
+  CANDIDATE="$(printf '%s' "$CANDIDATE" | tr -d '\r ')"
+  if [ -n "$CANDIDATE" ]; then
+    if valid_public_host "$CANDIDATE"; then
+      if $SUDO grep -qE '^WEBSSH_PUBLIC_HOST=' "$APP_DIR/.env" 2>/dev/null; then
+        $SUDO sed -i "s|^WEBSSH_PUBLIC_HOST=.*|WEBSSH_PUBLIC_HOST=${CANDIDATE}|" "$APP_DIR/.env"
+      else
+        printf 'WEBSSH_PUBLIC_HOST=%s\n' "$CANDIDATE" | $SUDO tee -a "$APP_DIR/.env" >/dev/null
+      fi
+      PUBLIC_HOST="$CANDIDATE"
+      echo -e "${COLOR_GREEN}[✓] WEBSSH_PUBLIC_HOST set to ${PUBLIC_HOST}${COLOR_RESET}"
+    else
+      echo -e "${COLOR_RED}[✗] '${CANDIDATE}' is not a valid public hostname; WEBSSH_PUBLIC_HOST left unset.${COLOR_RESET}"
+    fi
+  fi
+fi
+if [ -z "$PUBLIC_HOST" ]; then
+  echo -e "${COLOR_YELLOW}[!] WEBSSH_PUBLIC_HOST is not set: only local access works, a tunnel hostname gets 403.${COLOR_RESET}"
+fi
+
 # Generate the web login (nginx basic auth) on first install.
 # The password is random and shown only once; the file stores an apr1 hash.
 HTPASSWD_FILE="$APP_DIR/nginx/htpasswd"
@@ -170,6 +206,15 @@ for _ in $(seq 1 20); do
 done
 if [ "$HEALTHY" -eq 1 ]; then
   echo -e "${COLOR_GREEN}[✓] Web terminal is responding on http://${CHECK_IP}:${BIND_PORT}${COLOR_RESET}"
+  # Same check with the tunnel hostname, which is what Cloudflare forwards as Host
+  if [ -n "$PUBLIC_HOST" ]; then
+    PUBLIC_CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Host: ${PUBLIC_HOST}" "http://${CHECK_IP}:${BIND_PORT}/" 2>/dev/null || true)"
+    if [ "$PUBLIC_CODE" = "401" ] || [ "$PUBLIC_CODE" = "200" ]; then
+      echo -e "${COLOR_GREEN}[✓] Requests for ${PUBLIC_HOST} are accepted${COLOR_RESET}"
+    else
+      echo -e "${COLOR_RED}[✗] Requests for ${PUBLIC_HOST} got HTTP ${PUBLIC_CODE:-none}. Check WEBSSH_PUBLIC_HOST in ${APP_DIR}/.env${COLOR_RESET}"
+    fi
+  fi
 else
   echo -e "${COLOR_YELLOW}[!] Web terminal did not respond yet. Check: cd ${APP_DIR} && ${COMPOSE_CMD} logs${COLOR_RESET}"
 fi
