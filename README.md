@@ -106,7 +106,7 @@ In the Zero Trust dashboard under **Access > Applications**, create an applicati
 
 ```
 =================================================
-            WEB SSH CENTER  v1.5.0
+            WEB SSH CENTER  v1.5.1
 =================================================
 
 Saved Hosts:
@@ -175,6 +175,11 @@ Web SSH Center incorporates multi-layered security controls against common web-t
 ---
 
 ## Changelog
+
+### v1.5.1
+- **Fix:** The installer now sets `WEBSSH_PUBLIC_HOST` in `.env` when it is missing (from the environment variable or a prompt) and checks that the tunnel hostname is accepted. Updating to v1.5.0 without it made every request through the tunnel fail with 403.
+- **Fix:** nginx's 403 is sent as `text/plain`, so the browser shows "Host or Origin not allowed" instead of `ERR_INVALID_RESPONSE`.
+- **Upgrade:** Non-interactive updates can pass the hostname: `curl -sSL https://raw.githubusercontent.com/Lukas0923xcv/SSH/main/install.sh | WEBSSH_PUBLIC_HOST=ssh.yourdomain.com bash`.
 
 ### v1.5.0
 - **Security:** Replaced the hostname-based Origin check with exact Host and full-Origin allowlists. Removed the `localhost`/`127.0.0.1` cross rule, the private-LAN Host allowance, and the trust in client-supplied `X-Forwarded-Host` and `CF-Ray` headers.

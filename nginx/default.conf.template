@@ -71,6 +71,10 @@ server {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
 
     location / {
+        # nginx's own responses (the 403 below) as readable text. Without it they are
+        # application/octet-stream and Chrome shows ERR_INVALID_RESPONSE instead of the reason.
+        default_type text/plain;
+
         # Block unknown Host names (DNS rebinding) and cross-origin WebSocket hijacking attempts
         if ($request_allowed = 0) {
             return 403 "Forbidden: Host or Origin not allowed.\n";
